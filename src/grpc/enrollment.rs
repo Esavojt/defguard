@@ -18,7 +18,7 @@ use crate::{
             enrollment::{Token, TokenError, ENROLLMENT_TOKEN_TYPE},
             polling_token::PollingToken,
         },
-        Device, GatewayEvent, Id, Settings, User,
+        Device, GatewayEvent, Id, Settings, User, WireguardNetwork,
     },
     enterprise::{
         db::models::enterprise_settings::EnterpriseSettings, ldap::utils::ldap_add_user,
@@ -568,7 +568,7 @@ impl EnrollmentServer {
         );
         self.send_wireguard_event(GatewayEvent::DeviceCreated(DeviceInfo {
             device: device.clone(),
-            network_info,
+            network_info: network_info.clone(),
         }));
         info!(
             "Sent DeviceCreated event to gateway for device {}, user {}({:?})",
@@ -618,6 +618,31 @@ impl EnrollmentServer {
             "Created polling token for further client communication for device: {}, user {}({:?})",
             device.wireguard_pubkey, user.username, user.id,
         );
+
+        // prepare firewall update for affected networks if ACL & enterprise features are enabled
+        for network_info_item in network_info {
+            if let Some(location) =
+                WireguardNetwork::find_by_id(&mut *transaction, network_info_item.network_id).await
+                .map_err(|err| {
+                    error!("Failed to find Wireguard network by ID: {err}");
+                    Status::internal("Failed to find Wireguard network")
+                })?
+            {
+                if let Some(firewall_config) =
+                    location.try_get_firewall_config(&mut transaction).await
+                    .map_err(|err| {
+                        error!("Failed to get firewall config: {err}");
+                        Status::internal("Failed to get firewall config")
+                    })?
+                {
+                    info!("Sending firewall update for new device {} on network {}", device.name, location.name);
+                    self.send_wireguard_event(GatewayEvent::FirewallConfigChanged(
+                        location.id,
+                        firewall_config,
+                    ));
+                }
+            }
+        }
 
         transaction.commit().await.map_err(|err| {
             error!(

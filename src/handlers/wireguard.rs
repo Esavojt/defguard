@@ -662,6 +662,23 @@ pub(crate) async fn add_device(
         network_info: network_info.clone(),
     }));
 
+    // prepare firewall update for affected networks if ACL & enterprise features are enabled
+    for info in network_info {
+        if let Some(location) =
+            WireguardNetwork::find_by_id(&mut *transaction, info.network_id).await?
+        {
+            if let Some(firewall_config) =
+                location.try_get_firewall_config(&mut transaction).await?
+            {
+                debug!("Sending firewall config update for location {location} affected by adding user {username} device");
+                appstate.send_wireguard_event(GatewayEvent::FirewallConfigChanged(
+                    location.id,
+                    firewall_config,
+                ));
+            }
+        }
+    }
+
     transaction.commit().await?;
 
     let template_locations: Vec<TemplateLocation> = configs
