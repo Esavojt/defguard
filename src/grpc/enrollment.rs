@@ -622,20 +622,25 @@ impl EnrollmentServer {
         // prepare firewall update for affected networks if ACL & enterprise features are enabled
         for network_info_item in network_info {
             if let Some(location) =
-                WireguardNetwork::find_by_id(&mut *transaction, network_info_item.network_id).await
+                WireguardNetwork::find_by_id(&mut *transaction, network_info_item.network_id)
+                .await
                 .map_err(|err| {
                     error!("Failed to find Wireguard network by ID: {err}");
                     Status::internal("Failed to find Wireguard network")
                 })?
             {
                 if let Some(firewall_config) =
-                    location.try_get_firewall_config(&mut transaction).await
+                    location.try_get_firewall_config(&mut transaction)
+                    .await
                     .map_err(|err| {
                         error!("Failed to get firewall config: {err}");
                         Status::internal("Failed to get firewall config")
                     })?
                 {
-                    info!("Sending firewall update for new device {} on network {}", device.name, location.name);
+                    info!(
+                        "Sending firewall update for new device {} on network {}"
+                        , device.name, location.name
+                    );
                     self.send_wireguard_event(GatewayEvent::FirewallConfigChanged(
                         location.id,
                         firewall_config,
